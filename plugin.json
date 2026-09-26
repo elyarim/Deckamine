@@ -1,0 +1,11 @@
+{
+  "name": "Deckamine",
+  "author": "ElYarim",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["accessibility", "motion", "utility", "rog-ally"],
+    "description": "Vehicle Motion Cues for SteamOS / ROG Ally. Displays animated inertial edge dots synchronized with vehicle movement to prevent motion sickness (kinetosis) while gaming in cars, trains, or planes.",
+    "image": "https://raw.githubusercontent.com/elyarim/deckamine/main/assets/banner.png"
+  }
+}

@@ -1,0 +1,46 @@
+name: Build and Release Plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build Frontend
+        run: pnpm run build
+
+      - name: Package Plugin
+        run: |
+          mkdir -p deckamine
+          cp -r dist deckamine/
+          cp main.py deckamine/
+          cp plugin.json deckamine/
+          cp package.json deckamine/
+          cp README.md deckamine/
+          cp LICENSE deckamine/
+          zip -r deckamine.zip deckamine
+
+      - name: Upload Release Artifact
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: deckamine.zip
