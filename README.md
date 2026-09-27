@@ -13,7 +13,7 @@
 
 **Deckamine** brings Apple-style **Vehicle Motion Cues** to handheld gaming devices running SteamOS / Linux (such as the ASUS ROG Ally, ROG Ally X, and Steam Deck).
 
-By displaying subtle, animated inertia dots along the screen edges that respond in real time to real-world vehicle accelerations and centrifugal turns, Deckamine resolves the sensory conflict between your inner ear (vestibular system) and eyes, significantly reducing or preventing motion sickness (kinetosis) when gaming in moving cars, trains, buses, or airplanes.
+By displaying subtle, animated dots along the screen edges that respond to device motion, Deckamine is designed to provide visual motion cues that may help reduce discomfort for some people when gaming in moving cars, trains, buses, or airplanes. It does not guarantee prevention or treatment of motion sickness.
 
 ---
 
@@ -31,10 +31,12 @@ By displaying subtle, animated inertia dots along the screen edges that respond 
   - Sensitivity slider (1.0x to 10.0x).
   - Deadzone threshold to filter micro-vibrations.
   - Dot size (8px to 22px) and opacity (30% to 100%).
-  - Color presets (White, Cyan, Amber, Mint, Hot Pink).
+  - Color presets (White, Neon White, Cyan, Amber, Green).
   - Axis inversion (Invert X / Invert Y).
-  - One-tap neutral calibration button.
+  - Settings persist across plugin restarts.
+  - Calibration reports completion only after sensor samples are collected.
   - Live real-time G-force telemetry monitor.
+- **Sensor diagnostics:** Reports when no compatible accelerometer is detected or sensor reads fail.
 
 ---
 
@@ -82,6 +84,9 @@ cd deckamine
 
 # Install dependencies
 pnpm install
+
+# Run backend tests
+pnpm test
 
 # Build frontend bundle
 pnpm run build

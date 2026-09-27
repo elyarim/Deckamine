@@ -38,8 +38,22 @@ function getCompositionStore(element: HTMLElement | null): any {
 }
 
 const rpcCalibrate = callable<[], boolean>("calibrate");
-const rpcGetSettings = callable<[], Record<string, any>>("get_settings");
-const rpcSetSettings = callable<[settings: Record<string, any>], boolean>("set_settings");
+type DeckamineSettings = {
+  enabled: boolean;
+  sensitivity: number;
+  deadzone: number;
+  invert_x: boolean;
+  invert_y: boolean;
+  dot_size: number;
+  dot_color: string;
+  dot_opacity: number;
+};
+type SensorStatus = { status: string; message: string | null; sensor: string | null };
+type MotionEvent = { x: number; y: number; active: boolean };
+
+const rpcGetSettings = callable<[], Partial<DeckamineSettings>>("get_settings");
+const rpcSetSettings = callable<[settings: Partial<DeckamineSettings>], boolean>("set_settings");
+const rpcGetSensorStatus = callable<[], SensorStatus>("get_sensor_status");
 
 type Listener = () => void;
 class DeckamineStore {
@@ -57,7 +71,7 @@ class DeckamineStore {
 
   subscribe(l: Listener) { this.listeners.add(l); return () => { this.listeners.delete(l); }; }
   notify() { this.listeners.forEach((l) => l()); }
-  setSettings(patch: Partial<DeckamineStore>) { Object.assign(this, patch); this.notify(); }
+  setSettings(patch: Partial<DeckamineSettings>) { Object.assign(this, patch); this.notify(); }
   setMotionDirect(x: number, y: number) { this.target_x = x; this.target_y = y; }
 }
 const store = new DeckamineStore();
@@ -174,6 +188,10 @@ class DotOverlay {
   stop() {
     this.alive = false;
     cancelAnimationFrame(this.raf);
+    this.springs.forEach((spring, index) => {
+      spring.fill(0);
+      this.dots[index].style.transform = "translate3d(0,0,0)";
+    });
     this.wrapper.style.display = "none";
   }
 
@@ -251,12 +269,23 @@ const COLOR_PRESETS = [
   { label: "Ambar",                value: "#ffb300" },
   { label: "Verde",                value: "#00e676" },
 ];
+const SENSOR_STATUS_LABELS: Record<string, string> = {
+  starting: "Esperando lecturas",
+  ready: "Disponible",
+  unavailable: "No detectado",
+  error: "Error de lectura",
+};
 
 function Content() {
   const [, setTick] = useState(0);
   const [calibrating, setCalibrating] = useState(false);
   const [liveX, setLiveX] = useState(0);
   const [liveY, setLiveY] = useState(0);
+  const [sensorStatus, setSensorStatus] = useState<SensorStatus>({
+    status: "starting",
+    message: null,
+    sensor: null,
+  });
 
   useEffect(() => { return store.subscribe(() => setTick((t) => t + 1)); }, []);
 
@@ -269,34 +298,69 @@ function Content() {
   }, []);
 
   useEffect(() => {
+    let receivedEvent = false;
+    const listener = addEventListener<[data: SensorStatus]>("deckamine_sensor_status", (status) => {
+      receivedEvent = true;
+      setSensorStatus(status);
+    });
+    rpcGetSensorStatus()
+      .then((status) => {
+        if (!receivedEvent) setSensorStatus(status);
+      })
+      .catch((error) => {
+        toaster.toast({ title: "Deckamine", body: `No se pudo consultar el sensor: ${String(error)}` });
+      });
+    return () => removeEventListener("deckamine_sensor_status", listener);
+  }, []);
+
+  useEffect(() => {
     (async () => {
       try {
         const s = await rpcGetSettings();
-        if (s) store.setSettings({
-          enabled:     s.enabled     !== undefined ? Boolean(s.enabled)    : store.enabled,
-          sensitivity: s.sensitivity !== undefined ? Number(s.sensitivity) : store.sensitivity,
-          deadzone:    s.deadzone    !== undefined ? Number(s.deadzone)     : store.deadzone,
-          invert_x:    s.invert_x    !== undefined ? Boolean(s.invert_x)   : store.invert_x,
-          invert_y:    s.invert_y    !== undefined ? Boolean(s.invert_y)   : store.invert_y,
-          dot_size:    s.dot_size    !== undefined ? Number(s.dot_size)     : store.dot_size,
-          dot_color:   s.dot_color   !== undefined ? String(s.dot_color)   : store.dot_color,
-          dot_opacity: s.dot_opacity !== undefined ? Number(s.dot_opacity) : store.dot_opacity,
-        });
-      } catch (_) {}
+        if (s) store.setSettings(s);
+      } catch (error) {
+        toaster.toast({ title: "Deckamine", body: `No se pudieron cargar los ajustes: ${String(error)}` });
+      }
     })();
   }, []);
 
-  const save = async (patch: Record<string, any>) => {
-    try { store.setSettings(patch as any); await rpcSetSettings(patch); } catch (_) {}
+  const save = async (patch: Partial<DeckamineSettings>) => {
+    try {
+      await rpcSetSettings(patch);
+      store.setSettings(patch);
+    } catch (error) {
+      toaster.toast({ title: "Deckamine", body: `No se pudieron guardar los ajustes: ${String(error)}` });
+    }
   };
+
+  useEffect(() => {
+    const calibrationListener = addEventListener<[data: { status: string; message?: string }]>(
+      "deckamine_calibrated",
+      (data) => {
+        setCalibrating(false);
+        if (data?.status === "ok") {
+          toaster.toast({ title: "Deckamine", body: "Calibración completada." });
+        } else {
+          toaster.toast({
+            title: "Deckamine",
+            body: `Falló la calibración: ${data?.message || "error de lectura del sensor"}`,
+          });
+        }
+      }
+    );
+    return () => removeEventListener("deckamine_calibrated", calibrationListener);
+  }, []);
 
   const handleCalibrate = async () => {
     setCalibrating(true);
-    toaster.toast({ title: "Deckamine", body: "Sost'en la consola en tu postura natural..." });
+    toaster.toast({ title: "Deckamine", body: "Mantén la consola en tu postura natural..." });
     try {
-      await rpcCalibrate();
-      setTimeout(() => { setCalibrating(false); toaster.toast({ title: "Calibrado!", body: "Postura fijada." }); }, 700);
-    } catch (_) { setCalibrating(false); }
+      const started = await rpcCalibrate();
+      if (!started) throw new Error("el sensor no aceptó la calibración");
+    } catch (error) {
+      setCalibrating(false);
+      toaster.toast({ title: "Deckamine", body: `No se pudo iniciar la calibración: ${String(error)}` });
+    }
   };
 
   const handleTest = () => {
@@ -308,6 +372,13 @@ function Content() {
   return (
     <div>
       <PanelSection title="Estado">
+        <PanelSectionRow>
+          <div style={{ fontSize: "11px", opacity: 0.75, padding: "2px 0" }}>
+            Sensor: <strong>{sensorStatus.sensor || SENSOR_STATUS_LABELS[sensorStatus.status] || sensorStatus.status}</strong>
+            {sensorStatus.sensor ? ` (${SENSOR_STATUS_LABELS[sensorStatus.status] || sensorStatus.status})` : ""}
+            {sensorStatus.message ? ` — ${sensorStatus.message}` : ""}
+          </div>
+        </PanelSectionRow>
         <PanelSectionRow>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", opacity: 0.75, padding: "2px 0" }}>
             <span>X: <strong>{liveX.toFixed(1)}</strong></span>
@@ -358,8 +429,12 @@ function Content() {
 
 export default definePlugin(() => {
   routerHook.addGlobalComponent("DeckamineMotionOverlay", GlobalMotionOverlay);
-  const motionListener = addEventListener<[data: any]>("deckamine_motion", (data) => {
-    if (data?.active) store.setMotionDirect(data.x, data.y);
+  const motionListener = addEventListener<[data: MotionEvent]>("deckamine_motion", (data) => {
+    if (data?.active && Number.isFinite(data.x) && Number.isFinite(data.y)) {
+      store.setMotionDirect(data.x, data.y);
+    } else {
+      store.setMotionDirect(0, 0);
+    }
   });
   return {
     name: "Deckamine",
